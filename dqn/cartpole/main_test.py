@@ -16,11 +16,11 @@ class Q(nn.Module):
         # self.d4 = nn.Linear(133, 32, bias=False)
         # self.d5 = nn.Linear(37, 1, bias=False)
 
-        self.d1 = nn.Linear(4, 100, bias=False)
-        self.d2 = nn.Linear(100, 100, bias=False)
-        self.d3 = nn.Linear(100, 10, bias=False)
-        self.d4 = nn.Linear(10, 10, bias=False)
-        self.d5 = nn.Linear(10, 2, bias=False)
+        self.d1 = nn.Linear(4, 100)
+        self.d2 = nn.Linear(100, 100)
+        self.d3 = nn.Linear(100, 10)
+        self.d4 = nn.Linear(10, 10)
+        self.d5 = nn.Linear(10, 2)
         self.relu = nn.LeakyReLU()
         self.sig = nn.Sigmoid()
 
@@ -45,10 +45,10 @@ class Q_Learning:
         self.gamma = 0.95
         # self.optimizer = optim.SGD(self.Q.parameters(), lr=0.001, momentum=0.9)
         self.optimizer = optim.Adam(self.Q.parameters(), lr=0.001)
-        self.criterion = nn.MSELoss()
+        self.criterion = nn.MSELoss(reduction="sum")
         self.explorate_rate_max = 1.0
         self.explorate_rate_min = 0.01
-        self.explorate_decay = 0.9999
+        self.explorate_decay = 0.995
 
         self.explorate_rate = self.explorate_rate_max
 
@@ -72,10 +72,12 @@ class Q_Learning:
             next_action = now
             return next_action
 
-    def learn(self, save):
+    def decay(self):
         self.explorate_rate *= self.explorate_decay
         if self.explorate_rate < self.explorate_rate_min:
             self.explorate_rate = self.explorate_rate_min
+
+    def learn(self, save):
 
         self.optimizer.zero_grad()
 
@@ -86,7 +88,8 @@ class Q_Learning:
         action = torch.from_numpy(action).long().cuda(0)
 
         output = self.Q(input)
-        output = output[:, action]
+        front = torch.tensor(range(output.shape[0])).long().cuda(0)
+        output = output[front, action]
 
         left = np.array([i[2] for i in save])
         left = torch.from_numpy(left).float().cuda(0)
@@ -105,8 +108,8 @@ class Q_Learning:
         res[done] = 0
         # print(res)
         res = self.gamma * res + reward
-        # loss = self.criterion(output, res)
-        loss = ((output - res) * (output - res)).sum()
+        loss = self.criterion(output, res)
+        # loss = ((output - res) * (output - res)).sum()
         # print(loss.item())
         loss.backward()
 
@@ -132,11 +135,11 @@ class Q_Learning:
         self.optimizer.step()
 
     def save(self):
-        torch.save(self.Q.state_dict(), "cartpole_v1")
+        torch.save(self.Q.state_dict(), "cartpole_v1_test")
 
     def load(self):
         try:
-            self.Q.load_state_dict(torch.load("cartpole_v1"))
+            self.Q.load_state_dict(torch.load("cartpole_v1_test"))
             print("load_end!")
         except:
             print("load_error!")
@@ -188,6 +191,7 @@ def main():
                 q.learn(dictionary_sample)
 
             # add position threshold.
+            q.decay()
             if done:
                 done_cnt += 1
                 # env.render()

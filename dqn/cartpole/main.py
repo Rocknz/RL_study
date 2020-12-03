@@ -16,11 +16,11 @@ class Q(nn.Module):
         # self.d4 = nn.Linear(133, 32, bias=False)
         # self.d5 = nn.Linear(37, 1, bias=False)
 
-        self.d1 = nn.Linear(5, 10, bias=False)
-        self.d2 = nn.Linear(10, 10, bias=False)
-        self.d3 = nn.Linear(10, 10, bias=False)
-        self.d4 = nn.Linear(10, 10, bias=False)
-        self.d5 = nn.Linear(10, 1, bias=False)
+        self.d1 = nn.Linear(5, 1000)
+        self.d2 = nn.Linear(1000, 1000)
+        self.d3 = nn.Linear(1000, 100)
+        self.d4 = nn.Linear(100, 100)
+        self.d5 = nn.Linear(100, 1)
         self.relu = nn.LeakyReLU()
         self.sig = nn.Sigmoid()
 
@@ -34,7 +34,7 @@ class Q(nn.Module):
         # x = torch.cat((x, ox), 1)
         x = self.relu(self.d4(x))
         # x = torch.cat((x, ox), 1)
-        x = self.relu(self.d5(x))
+        x = self.d5(x)
         return x
 
 
@@ -45,10 +45,11 @@ class Q_Learning:
         self.gamma = 0.95
         # self.optimizer = optim.SGD(self.Q.parameters(), lr=0.001, momentum=0.9)
         self.optimizer = optim.Adam(self.Q.parameters(), lr=0.001)
-        self.criterion = nn.MSELoss()
+        self.criterion = nn.MSELoss(reduction="sum")
         self.explorate_rate_max = 1.0
-        self.explorate_rate_min = 0.01
-        self.explorate_decay = 0.999
+        self.explorate_rate_min = 0.1
+        self.explorate_decay = 0.9999
+        # self.explorate_decay = 0.995
 
         self.explorate_rate = self.explorate_rate_max
 
@@ -61,12 +62,12 @@ class Q_Learning:
             next_action = 0
             now = state
             # print(now)
-            now_A = torch.from_numpy(np.array([np.append(now, 0)])).float().cuda(0)
-            now_B = torch.from_numpy(np.array([np.append(now, 1)])).float().cuda(0)
+            now_A = torch.from_numpy(np.array([[np.append(now, 0)]])).float().cuda(0)
+            now_B = torch.from_numpy(np.array([[np.append(now, 1)]])).float().cuda(0)
             # print(now_A)
-            A = self.Q(now_A).item()
-            B = self.Q(now_B).item()
-            if A > B:
+            A = self.Q(now_A)
+            B = self.Q(now_B)
+            if A[0] > B[0]:
                 now = 0
             else:
                 now = 1
@@ -74,15 +75,16 @@ class Q_Learning:
             next_action = now
             return next_action
 
-    def learn(self, save):
+    def decay(self):
         self.explorate_rate *= self.explorate_decay
         if self.explorate_rate < self.explorate_rate_min:
             self.explorate_rate = self.explorate_rate_min
 
+    def learn(self, save):
         self.optimizer.zero_grad()
         input = np.array([np.append(i[0], i[1]) for i in save])
         input = torch.from_numpy(input).float().cuda(0)
-        output = self.Q(input)
+        output = self.Q(input).squeeze(1)
 
         left = np.array([np.append(i[2], 0) for i in save])
         left = torch.from_numpy(left).float().cuda(0)
@@ -91,20 +93,20 @@ class Q_Learning:
 
         res1 = self.Q(left)
         res2 = self.Q(right)
-        res, index = torch.max(torch.stack([res1, res2], 2), 2)
-        res = Variable(res, requires_grad=False)
+        res = torch.stack([res1, res2], 1).squeeze(2)
+        res, index = torch.max(res, 1)
+        # res = Variable(res, requires_grad=False)
 
         reward = np.array([i[3] for i in save])
         reward = torch.from_numpy(reward).float().cuda(0)
         done = np.array([i[4] for i in save])
         done = torch.from_numpy(done).bool().cuda(0)
-        done = done.unsqueeze(1)
-        reward = reward.unsqueeze(1)
+
         res[done] = 0
         # print(res)
         res = self.gamma * res + reward
-        # loss = self.criterion(output, res)
-        loss = ((output - res) * (output - res)).sum()
+        loss = self.criterion(output, res)
+        # loss = ((output - res) * (output - res)).sum()
         # print(loss.item())
         loss.backward()
 
@@ -158,40 +160,49 @@ def main():
         save = []
         done_cnt = 0
         res = 0
+        cnt = 0
         for _ in range(1000):
-            # env.render()
+            env.render()
             # print(obs)
             next_action = q.next(obs)
             before_obs = obs
             before_action = next_action
             obs, reward, done, info = env.step(next_action)
             # print("{}, {}".format(done, reward))
-            # if obs[0] >= 2.0 or obs[0] <= -2.0:
-            #     reward = 0
-            #     done = True
+            if obs[0] <= 1.0 and obs[0] >= -1.0:
+                reward += 0.2
+
+            if obs[2] <= 0.1 and obs[2] >= -0.1:
+                reward += 1
+
+            if obs[2] <= 0.01 and obs[2] >= -0.01:
+                reward += 10
 
             res += reward
+            cnt += 1
+
             save.append([before_obs, before_action, obs, reward, done])
             # add position threshold.
+            dictionary.extend([[before_obs, before_action, obs, reward, done]])
+            # dictionary.extend(save[:])
+            dictionary_size = 1000000
+            sampling_size = 200
+            while len(dictionary) > dictionary_size:
+                n = random.sample(range(len(dictionary)), 1)
+                dictionary.pop(n[0])
+
+            if len(dictionary) >= sampling_size:
+                dictionary_sample = random.sample(dictionary, sampling_size)
+                q.learn(dictionary_sample)
+
+            q.decay()
             if done:
                 done_cnt += 1
                 # env.render()
                 if done_cnt >= 1:
                     break
 
-            # dictionary.extend(save[:])
-            dictionary.extend([[before_obs, before_action, obs, reward, done]])
-            dictionary_size = 100000
-            sampling_size = 20
-            while len(dictionary) > dictionary_size:
-                n = random.sample(range(len(dictionary)), 1)
-                dictionary.pop(n[0])
-
-            dictionary_sample = random.sample(dictionary, min(sampling_size, len(dictionary)))
-
-            q.learn(dictionary_sample)
-
-        print(res, q.explorate_rate)
+        print(res, cnt, q.explorate_rate)
 
         cnt = 0
         if cnt % 1000 == 0:
