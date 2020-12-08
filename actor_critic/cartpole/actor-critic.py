@@ -4,6 +4,7 @@ import gym
 import numpy as np
 import random
 from threading import Thread, Lock
+
 # independent.
 
 # Critic
@@ -27,7 +28,7 @@ class Actor(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(100, action_space),
             nn.LeakyReLU(),
-            nn.Softmax(1)
+            nn.Softmax(1),
         )
 
     def forward(self, x):
@@ -48,7 +49,7 @@ class Critic(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(100, 100),
             nn.LeakyReLU(),
-            nn.Linear(100, action_space)
+            nn.Linear(100, action_space),
         )
 
     def forward(self, x):
@@ -63,14 +64,16 @@ class Learning:
         self.critic = Critic(state_space, action_space).cuda(cuda_num)
         self.cuda_num = cuda_num
         self.sample_size = 1000
-        self.criterion = nn.MSELoss(reduction='sum')
+        self.criterion = nn.MSELoss(reduction="sum")
         self.gamma = 0.95
         self.learning_rate = 0.001
         self.optimizer_actor = torch.optim.Adam(
-            params=self.actor.parameters(), lr=self.learning_rate)
+            params=self.actor.parameters(), lr=self.learning_rate
+        )
 
         self.optimizer_critic = torch.optim.Adam(
-            params=self.critic.parameters(), lr=self.learning_rate)
+            params=self.critic.parameters(), lr=self.learning_rate
+        )
 
     def save(self):
         torch.save(self.actor.state_dict(), "cartpole_actor")
@@ -85,8 +88,7 @@ class Learning:
             print("load_error!")
 
     def action(self, state):
-        torch_state = torch.from_numpy(
-            state).float().unsqueeze(0).cuda(self.cuda_num)
+        torch_state = torch.from_numpy(state).float().unsqueeze(0).cuda(self.cuda_num)
         res = self.actor(torch_state).squeeze(0).cpu().detach().numpy()
         val = np.random.choice(2, 1, p=res)[0]
         return val
@@ -138,8 +140,7 @@ class Learning:
         n_now = self.critic(s)
         n_next = self.critic(s_next)
 
-        iters = torch.Tensor(range(n_now.shape[0])
-                             ).long().cuda(self.cuda_num)
+        iters = torch.Tensor(range(n_now.shape[0])).long().cuda(self.cuda_num)
 
         n_now = n_now[iters[:], action[:]]
         n_next = n_next[iters[:], action_next[:]]
@@ -173,12 +174,11 @@ def simulation(index, mutex, history, steps, learning):
 
         if state[1] < 0.5 and state[1] > -0.5:
             reward += (0.5 - abs(state[1])) * (0.5 - abs(state[1])) * 4
-        
-        reward *= 20
-        
+
+        reward *= 2000
+
         mutex.acquire()
-        history.append(
-            [before_state, before_action, state, next_action, reward, done])
+        history.append([before_state, before_action, state, next_action, reward, done])
         mutex.release()
 
         step += 1
@@ -218,8 +218,7 @@ def main():
 
         for index in range(simulation_num):
             step = 0
-            thread = Thread(target=simulation, args=(
-                index, mutex, history, steps, learning))
+            thread = Thread(target=simulation, args=(index, mutex, history, steps, learning))
             thread.start()
             threads.append(thread)
 
